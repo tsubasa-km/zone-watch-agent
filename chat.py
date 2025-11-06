@@ -17,7 +17,7 @@ def load_vectorstore():
     
     # Embeddingsを初期化
     embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/embedding-001",
+        model="gemini-embedding-001",
         google_api_key=api_key
     )
     
@@ -48,14 +48,11 @@ def create_qa_chain():
     
     # プロンプトテンプレートを定義
     prompt_template = """以下の情報を基に、質問に対して正確で詳細な回答を提供してください。
-情報に基づいて回答できない場合は、「提供された情報では回答できません」と答えてください。
 
 関連情報:
 {context}
 
-質問: {question}
-
-回答:"""
+質問: {question}"""
 
     PROMPT = PromptTemplate(
         template=prompt_template,
