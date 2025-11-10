@@ -29,6 +29,47 @@ def load_vectorstore():
     
     return vectorstore
 
+def extract_document_info(vectorstore):
+    """ベクトルストアからドキュメント情報を抽出"""
+    try:
+        data = vectorstore.get(include=["metadatas"])
+    except Exception as e:
+        print(f"警告: ドキュメント情報の取得に失敗しました ({e})")
+        return []
+    
+    metadatas = data.get("metadatas") or []
+    doc_map = {}
+    for metadata in metadatas:
+        if not metadata:
+            continue
+        source = metadata.get("source")
+        if not source:
+            continue
+        name = os.path.basename(source)
+        entry = doc_map.setdefault(name, {"path": source, "chunk_count": 0})
+        entry["chunk_count"] += 1
+    
+    return [
+        {"name": name, "path": info["path"], "chunk_count": info["chunk_count"]}
+        for name, info in sorted(doc_map.items())
+    ]
+
+def build_system_prompt(document_infos):
+    """ドキュメント一覧を含むシステムプロンプトを生成"""
+    doc_section = ""
+    if document_infos:
+        doc_lines = "\n".join(f"- {doc['name']}" for doc in document_infos)
+        doc_section = f"下記のドキュメントを参照し、質問に答えてください。\n{doc_lines}\n\n"
+    
+    base_prompt = """以下の情報を基に、質問に対して正確で詳細な回答を提供してください。
+
+関連情報:
+{context}
+
+質問: {question}"""
+    
+    return f"{doc_section}{base_prompt}"
+
 def create_qa_chain():
     """QAチェーンを作成"""
     # Google AI Studio APIキーの確認
@@ -45,14 +86,10 @@ def create_qa_chain():
     
     # ベクトルストアを読み込み
     vectorstore = load_vectorstore()
+    document_infos = extract_document_info(vectorstore)
     
     # プロンプトテンプレートを定義
-    prompt_template = """以下の情報を基に、質問に対して正確で詳細な回答を提供してください。
-
-関連情報:
-{context}
-
-質問: {question}"""
+    prompt_template = build_system_prompt(document_infos)
 
     PROMPT = PromptTemplate(
         template=prompt_template,
@@ -71,7 +108,7 @@ def create_qa_chain():
         return_source_documents=True
     )
     
-    return qa_chain
+    return qa_chain, document_infos
 
 def main():
     """メイン処理"""
@@ -85,7 +122,7 @@ def main():
     
     try:
         # QAチェーンを作成
-        qa_chain = create_qa_chain()
+        qa_chain, document_infos = create_qa_chain()
         print("✅ RAGシステムの準備が完了しました！")
         print("質問を入力してください。終了するには 'quit' または 'exit' と入力してください。\n")
         

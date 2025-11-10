@@ -1,16 +1,38 @@
 import os
 import glob
+import math
+from time import sleep
 from dotenv import load_dotenv
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
+from tqdm import tqdm
 
 # 環境変数の読み込み
 load_dotenv()
 
 SUPPORTED_EXTENSIONS = [".txt", ".md", ".pdf"]
 TEXT_EXTENSIONS = {".txt", ".md"}
+EMBEDDING_RPM_LIMIT = 100
+EMBEDDING_TPM_LIMIT = 30_000
+EMBEDDING_RPD_LIMIT = 1_000
+EST_TOKENS_PER_DOCUMENT = 1_000
+MAX_DOCS_PER_MINUTE = max(1, EMBEDDING_TPM_LIMIT // EST_TOKENS_PER_DOCUMENT)
+CHROMA_BATCH_SIZE = min(5, MAX_DOCS_PER_MINUTE)
+
+
+def estimate_token_count(docs):
+    """簡易的にトークン数を推定"""
+    return sum(len(getattr(doc, "page_content", "") or "") for doc in docs)
+
+
+def calculate_rate_limit_delay(token_count):
+    """RPM/TPM上限から必要な待機時間を算出"""
+    rpm_delay = 60.0 / EMBEDDING_RPM_LIMIT
+    tpm_delay = (token_count / EMBEDDING_TPM_LIMIT) * 60.0
+    return max(rpm_delay, tpm_delay)
+
 
 def load_documents_from_directory(directory_path):
     """指定したディレクトリ内のtxt/md/pdfファイルを読み込む"""
@@ -74,13 +96,41 @@ def create_vectorstore(documents):
         google_api_key=api_key
     )
     
-    # Chromaベクトルストアを作成
-    vectorstore = Chroma.from_documents(
-        documents=documents,
-        embedding=embeddings,
-        persist_directory="./vectordb"
-    )
+    if not documents:
+        raise ValueError("追加できるドキュメントがありません。")
     
+    total_docs = len(documents)
+    total_chunks = math.ceil(total_docs / CHROMA_BATCH_SIZE)
+    estimated_requests = total_chunks
+    if estimated_requests > EMBEDDING_RPD_LIMIT:
+        print(f"警告: 推定リクエスト数 {estimated_requests} 件が日次上限 {EMBEDDING_RPD_LIMIT} 件を超えます。")
+    
+    # チャンク処理でレート制限を回避しながらベクトルストアを作成
+    vectorstore = None
+    progress_bar = tqdm(total=total_chunks, desc="チャンク処理", unit="チャンク")
+    for start in range(0, total_docs, CHROMA_BATCH_SIZE):
+        chunk = documents[start:start + CHROMA_BATCH_SIZE]
+        token_count = estimate_token_count(chunk)
+        if token_count == 0:
+            token_count = len(chunk) * EST_TOKENS_PER_DOCUMENT
+
+        if vectorstore is None:
+            vectorstore = Chroma.from_documents(
+                documents=chunk,
+                embedding=embeddings,
+                persist_directory="./vectordb"
+            )
+        else:
+            vectorstore.add_documents(chunk)
+
+        progress_bar.set_postfix({"docs": len(chunk), "tokens": token_count})
+        progress_bar.update(1)
+
+        if start + CHROMA_BATCH_SIZE < total_docs:
+            delay_seconds = calculate_rate_limit_delay(token_count)
+            sleep(delay_seconds)
+    progress_bar.close()
+
     # Chroma 0.4.x以降では自動で永続化されるため、persist()は不要
     print("ベクトルストアが正常に作成・保存されました。")
     
