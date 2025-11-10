@@ -4,7 +4,7 @@
 
 ## 機能
 
-- `dataディレクトリ`内のtxtファイルからベクトルデータベースを構築
+- `dataディレクトリ`内のtxt/md/pdfファイルからベクトルデータベースを構築
 - Google AI Studio APIを使用した質問応答
 - ChromaDBによるベクトル検索
 - ソースドキュメントの参照表示
@@ -29,13 +29,14 @@ Google AI Studio APIキーは [https://makersuite.google.com/app/apikey](https:/
 
 ### 3. データの準備
 
-`data`ディレクトリを作成し、質問応答の対象となるtxtファイルを配置してください：
+`data`ディレクトリを作成し、質問応答の対象となるtxt/md/pdfファイルを配置してください：
 
 ```
 project/
 ├── data/
 │   ├── document1.txt
-│   ├── document2.txt
+│   ├── document2.md
+│   ├── document3.pdf
 │   └── ...
 ├── build_vectordb.py
 ├── chat.py
@@ -47,14 +48,14 @@ project/
 
 ### 1. ベクトルデータベースの構築
 
-最初に、dataディレクトリ内のtxtファイルからベクトルデータベースを構築します：
+最初に、dataディレクトリ内のtxt/md/pdfファイルからベクトルデータベースを構築します：
 
 ```bash
 python build_vectordb.py
 ```
 
 このスクリプトは以下の処理を行います：
-- dataディレクトリ内の全てのtxtファイルを読み込み
+- dataディレクトリ内の全てのtxt/md/pdfファイルを読み込み
 - ドキュメントをチャンクに分割
 - Google AI Studio APIを使用してベクトル化
 - ChromaDBにベクトルデータを保存
@@ -81,7 +82,7 @@ python chat.py
 ## 注意点
 
 - Google AI Studio APIキーが必要です
-- dataディレクトリにtxtファイルが必要です
+- dataディレクトリにtxt/md/pdfファイルが必要です
 - 初回実行時は`build_vectordb.py`を先に実行してください
 - ベクトルデータベースは`./vectordb`ディレクトリに保存されます
 
@@ -93,9 +94,9 @@ python chat.py
    - `.env`ファイルが正しく作成されているか確認
    - Google AI Studio APIキーが有効か確認
 
-2. **txtファイルが見つからない**
+2. **対応ファイルが見つからない**
    - `data`ディレクトリが存在するか確認
-   - txtファイルが正しく配置されているか確認
+   - txt/md/pdfファイルが正しく配置されているか確認
 
 3. **ベクトルデータベースが見つからない**
    - `build_vectordb.py`を先に実行したか確認

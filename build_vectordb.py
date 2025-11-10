@@ -1,7 +1,7 @@
 import os
 import glob
 from dotenv import load_dotenv
-from langchain_community.document_loaders import TextLoader
+from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
@@ -9,25 +9,40 @@ from langchain_chroma import Chroma
 # 環境変数の読み込み
 load_dotenv()
 
+SUPPORTED_EXTENSIONS = [".txt", ".md", ".pdf"]
+TEXT_EXTENSIONS = {".txt", ".md"}
+
 def load_documents_from_directory(directory_path):
-    """指定したディレクトリ内の全てのtxtファイルを読み込む"""
+    """指定したディレクトリ内のtxt/md/pdfファイルを読み込む"""
     documents = []
     
-    # dataディレクトリ内の全てのtxtファイルを取得
-    txt_files = glob.glob(os.path.join(directory_path, "*.txt"))
+    # dataディレクトリ内の対応ファイルを取得
+    candidate_paths = glob.glob(os.path.join(directory_path, "*"))
+    target_files = [
+        path for path in candidate_paths
+        if os.path.isfile(path) and os.path.splitext(path)[1].lower() in SUPPORTED_EXTENSIONS
+    ]
     
-    if not txt_files:
-        print(f"警告: {directory_path} ディレクトリにtxtファイルが見つかりません。")
+    if not target_files:
+        supported = ", ".join(ext.lstrip('.') for ext in SUPPORTED_EXTENSIONS)
+        print(f"警告: {directory_path} ディレクトリに対応するファイルが見つかりません。({supported})")
         return documents
     
-    print(f"{len(txt_files)}個のtxtファイルが見つかりました。")
+    print(f"{len(target_files)}個のファイルが見つかりました。対応フォーマット: {', '.join(ext.lstrip('.') for ext in SUPPORTED_EXTENSIONS)}")
     
-    for file_path in txt_files:
+    for file_path in sorted(target_files):
         try:
-            loader = TextLoader(file_path, encoding='utf-8')
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext in TEXT_EXTENSIONS:
+                loader = TextLoader(file_path, encoding='utf-8')
+            elif ext == ".pdf":
+                loader = PyPDFLoader(file_path)
+            else:
+                print(f"スキップ: 未対応の拡張子 {file_path}")
+                continue
             file_documents = loader.load()
             documents.extend(file_documents)
-            print(f"読み込み完了: {os.path.basename(file_path)}")
+            print(f"読み込み完了: {os.path.basename(file_path)} ({ext.lstrip('.')})")
         except Exception as e:
             print(f"エラー: {file_path} の読み込みに失敗しました - {e}")
     
@@ -55,7 +70,7 @@ def create_vectorstore(documents):
     
     # Google Generative AI Embeddingsを初期化
     embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/embedding-001",
+        model="gemini-embedding-001",
         google_api_key=api_key
     )
     
@@ -79,7 +94,7 @@ def main():
     data_directory = "./data"
     if not os.path.exists(data_directory):
         print(f"エラー: {data_directory} ディレクトリが存在しません。")
-        print("dataディレクトリを作成し、txtファイルを配置してください。")
+        print("dataディレクトリを作成し、txt/md/pdfファイルを配置してください。")
         return
     
     try:
