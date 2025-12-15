@@ -1,6 +1,9 @@
 import os
 import glob
 import math
+import shutil
+import sqlite3
+from pathlib import Path
 from time import sleep
 from dotenv import load_dotenv
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
@@ -14,6 +17,8 @@ load_dotenv()
 
 SUPPORTED_EXTENSIONS = [".txt", ".md", ".pdf"]
 TEXT_EXTENSIONS = {".txt", ".md"}
+EMBEDDING_MODEL = "text-embedding-004"
+PERSIST_DIRECTORY = "./vectordb"
 EMBEDDING_RPM_LIMIT = 100
 EMBEDDING_TPM_LIMIT = 30_000
 EMBEDDING_RPD_LIMIT = 1_000
@@ -70,6 +75,37 @@ def load_documents_from_directory(directory_path):
     
     return documents
 
+def get_embedding_dimension(embeddings):
+    """埋め込みモデルのベクトル次元を取得"""
+    sample_vector = embeddings.embed_query("embedding dimension check")
+    return len(sample_vector)
+
+def read_vectorstore_dimension(persist_directory):
+    """既存ベクトルストアの次元を取得"""
+    sqlite_path = Path(persist_directory) / "chroma.sqlite3"
+    if not sqlite_path.exists():
+        return None
+    
+    try:
+        with sqlite3.connect(sqlite_path) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT dimension FROM collections LIMIT 1")
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as e:
+        print(f"警告: 既存ベクトルDBのメタデータ取得に失敗しました ({e})")
+        return None
+
+def reset_vectorstore_if_mismatch(target_dimension, persist_directory):
+    """既存ベクトルDBの次元が異なる場合は削除して作り直す"""
+    current_dimension = read_vectorstore_dimension(persist_directory)
+    if current_dimension is None:
+        return
+    
+    if current_dimension != target_dimension:
+        print(f"既存ベクトルDBの次元 {current_dimension} と現在の埋め込み次元 {target_dimension} が一致しません。再作成します。")
+        shutil.rmtree(persist_directory, ignore_errors=True)
+
 def split_documents(documents):
     """ドキュメントをチャンクに分割"""
     text_splitter = RecursiveCharacterTextSplitter(
@@ -92,9 +128,11 @@ def create_vectorstore(documents):
     
     # Google Generative AI Embeddingsを初期化
     embeddings = GoogleGenerativeAIEmbeddings(
-        model="gemini-embedding-001",
+        model=EMBEDDING_MODEL,
         google_api_key=api_key
     )
+    embedding_dimension = get_embedding_dimension(embeddings)
+    reset_vectorstore_if_mismatch(embedding_dimension, PERSIST_DIRECTORY)
     
     if not documents:
         raise ValueError("追加できるドキュメントがありません。")
@@ -118,7 +156,7 @@ def create_vectorstore(documents):
             vectorstore = Chroma.from_documents(
                 documents=chunk,
                 embedding=embeddings,
-                persist_directory="./vectordb"
+                persist_directory=PERSIST_DIRECTORY
             )
         else:
             vectorstore.add_documents(chunk)

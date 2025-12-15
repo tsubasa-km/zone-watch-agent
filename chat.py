@@ -1,4 +1,6 @@
 import os
+import sqlite3
+from pathlib import Path
 from dotenv import load_dotenv
 from langchain_google_genai import GoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
@@ -7,6 +9,30 @@ from langchain.prompts import PromptTemplate
 
 # 環境変数の読み込み
 load_dotenv()
+
+EMBEDDING_MODEL = "text-embedding-004"
+PERSIST_DIRECTORY = "./vectordb"
+
+def get_embedding_dimension(embeddings):
+    """埋め込みモデルのベクトル次元を取得"""
+    sample_vector = embeddings.embed_query("embedding dimension check")
+    return len(sample_vector)
+
+def read_vectorstore_dimension(persist_directory):
+    """既存ベクトルストアの次元を取得"""
+    sqlite_path = Path(persist_directory) / "chroma.sqlite3"
+    if not sqlite_path.exists():
+        return None
+    
+    try:
+        with sqlite3.connect(sqlite_path) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT dimension FROM collections LIMIT 1")
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as e:
+        print(f"警告: ベクトルストアのメタデータ確認に失敗しました ({e})")
+        return None
 
 def load_vectorstore():
     """保存されたベクトルストアを読み込む"""
@@ -17,13 +43,20 @@ def load_vectorstore():
     
     # Embeddingsを初期化
     embeddings = GoogleGenerativeAIEmbeddings(
-        model="gemini-embedding-001",
+        model=EMBEDDING_MODEL,
         google_api_key=api_key
     )
+    embedding_dimension = get_embedding_dimension(embeddings)
+    stored_dimension = read_vectorstore_dimension(PERSIST_DIRECTORY)
+    if stored_dimension and stored_dimension != embedding_dimension:
+        raise ValueError(
+            f"ベクトルDBの埋め込み次元({stored_dimension})が現在のモデルの次元({embedding_dimension})と一致しません。"
+            "build_vectordb.py を実行してベクトルDBを再作成してください。"
+        )
     
     # 保存されたベクトルストアを読み込み
     vectorstore = Chroma(
-        persist_directory="./vectordb",
+        persist_directory=PERSIST_DIRECTORY,
         embedding_function=embeddings
     )
     
@@ -115,7 +148,7 @@ def main():
     print("🤖 RAGチャットシステムを起動しています...")
     
     # ベクトルストアの存在確認
-    if not os.path.exists("./vectordb"):
+    if not os.path.exists(PERSIST_DIRECTORY):
         print("エラー: ベクトルストアが見つかりません。")
         print("まず build_vectordb.py を実行してベクトルストアを作成してください。")
         return
